@@ -1,0 +1,6 @@
+psql "postgresql://postgres:LZBaWdqPAv8DUdUR@db.nqjctcgqmmhqswpjubyk.supabase.co:5432/postgres" -c "\copy roles FROM 'C:/Python/Project_Cd_Manage/supabase_export/roles.csv' WITH CSV HEADER"
+psql "postgresql://postgres:LZBaWdqPAv8DUdUR@db.nqjctcgqmmhqswpjubyk.supabase.co:5432/postgres" -c "\copy people FROM 'C:/Python/Project_Cd_Manage/supabase_export/people.csv' WITH CSV HEADER"
+psql "postgresql://postgres:LZBaWdqPAv8DUdUR@db.nqjctcgqmmhqswpjubyk.supabase.co:5432/postgres" -c "\copy albums FROM 'C:/Python/Project_Cd_Manage/supabase_export/albums.csv' WITH CSV HEADER"
+psql "postgresql://postgres:LZBaWdqPAv8DUdUR@db.nqjctcgqmmhqswpjubyk.supabase.co:5432/postgres" -c "\copy tracks FROM 'C:/Python/Project_Cd_Manage/supabase_export/tracks.csv' WITH CSV HEADER"
+psql "postgresql://postgres:LZBaWdqPAv8DUdUR@db.nqjctcgqmmhqswpjubyk.supabase.co:5432/postgres" -c "\copy album_people FROM 'C:/Python/Project_Cd_Manage/supabase_export/album_people.csv' WITH CSV HEADER"
+psql "postgresql://postgres:LZBaWdqPAv8DUdUR@db.nqjctcgqmmhqswpjubyk.supabase.co:5432/postgres" -c "\copy track_people FROM 'C:/Python/Project_Cd_Manage/supabase_export/track_people.csv' WITH CSV HEADER"

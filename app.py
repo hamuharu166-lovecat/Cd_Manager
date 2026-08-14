@@ -1,9 +1,76 @@
+import os
 import re
 import streamlit as st
 import sqlite3
 import datetime as dt
 
+try:
+    import psycopg
+except ImportError:  # pragma: no cover
+    psycopg = None
+
+
+def get_database_url():
+    value = os.getenv("DATABASE_URL")
+    if value:
+        return value
+    try:
+        return st.secrets["DATABASE_URL"]
+    except Exception:
+        return None
+
+
 DB_NAME = "music.db"
+DATABASE_URL = get_database_url()
+USE_POSTGRES = bool(DATABASE_URL)
+
+
+class SqlCompatCursor:
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def execute(self, query, params=None):
+        if USE_POSTGRES and params is not None and "?" in query:
+            query = query.replace("?", "%s")
+        return self._cursor.execute(query, params)
+
+    @property
+    def lastrowid(self):
+        return getattr(self._cursor, "lastrowid", None)
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+
+class SqlCompatConnection:
+    def __init__(self, conn):
+        self._conn = conn
+
+    def cursor(self):
+        return SqlCompatCursor(self._conn.cursor())
+
+    def commit(self):
+        return self._conn.commit()
+
+    def close(self):
+        return self._conn.close()
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
+def connect_db():
+    if USE_POSTGRES:
+        if psycopg is None:
+            raise RuntimeError("DATABASE_URL が設定されていますが、psycopg が未インストールです。pip install psycopg[binary] を実行してください。")
+        try:
+            return SqlCompatConnection(psycopg.connect(DATABASE_URL, connect_timeout=10, sslmode="require"))
+        except Exception as exc:
+            raise RuntimeError(f"PostgreSQL 接続に失敗しました: {exc}") from exc
+    try:
+        return sqlite3.connect(DB_NAME)
+    except Exception as exc:
+        raise RuntimeError(f"SQLite 接続に失敗しました: {exc}") from exc
 
 
 def is_full_width_kana(value):
@@ -18,20 +85,34 @@ def is_full_width_kana(value):
 # DB 初期化
 # -----------------------------
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
 
     def ensure_column(table_name, column_name, column_type):
+        if USE_POSTGRES:
+            c.execute(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {column_name} {column_type}")
+            return
         columns = c.execute(f"PRAGMA table_info({table_name})").fetchall()
         if not any(col[1] == column_name for col in columns):
             c.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
 
+    if USE_POSTGRES:
+        album_id_type = "BIGSERIAL PRIMARY KEY"
+        people_id_type = "BIGSERIAL PRIMARY KEY"
+        role_id_type = "BIGSERIAL PRIMARY KEY"
+        other_id_type = "BIGSERIAL PRIMARY KEY"
+    else:
+        album_id_type = "INTEGER PRIMARY KEY AUTOINCREMENT"
+        people_id_type = "INTEGER PRIMARY KEY AUTOINCREMENT"
+        role_id_type = "INTEGER PRIMARY KEY AUTOINCREMENT"
+        other_id_type = "INTEGER PRIMARY KEY AUTOINCREMENT"
+
     # -----------------------------
     # アルバム
     # -----------------------------
-    c.execute("""
+    c.execute(f"""
         CREATE TABLE IF NOT EXISTS albums (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {album_id_type},
             catalog_no TEXT,
             title TEXT NOT NULL,
             year INTEGER,
@@ -49,9 +130,9 @@ def init_db():
     # -----------------------------
     # 曲
     # -----------------------------
-    c.execute("""
+    c.execute(f"""
         CREATE TABLE IF NOT EXISTS tracks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {other_id_type},
             album_id INTEGER,
             track_no INTEGER,
             title TEXT NOT NULL,
@@ -68,9 +149,9 @@ def init_db():
     # -----------------------------
     # 人物（アーティスト・作詞者・作曲者・編曲者・演奏者）
     # -----------------------------
-    c.execute("""
+    c.execute(f"""
         CREATE TABLE IF NOT EXISTS people (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {people_id_type},
             name TEXT NOT NULL UNIQUE,
             note TEXT
         )
@@ -79,9 +160,9 @@ def init_db():
     # -----------------------------
     # 役割（Artist / Composer / Arranger / Lyricist / Performer）
     # -----------------------------
-    c.execute("""
+    c.execute(f"""
         CREATE TABLE IF NOT EXISTS roles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {role_id_type},
             role_name TEXT NOT NULL UNIQUE
         )
     """)
@@ -89,14 +170,17 @@ def init_db():
     # 初期役割データを挿入
     default_roles = ["Artist", "Composer", "Arranger", "Lyricist", "Performer"]
     for role in default_roles:
-        c.execute("INSERT OR IGNORE INTO roles (role_name) VALUES (?)", (role,))
+        if USE_POSTGRES:
+            c.execute("INSERT INTO roles (role_name) VALUES (%s) ON CONFLICT (role_name) DO NOTHING", (role,))
+        else:
+            c.execute("INSERT OR IGNORE INTO roles (role_name) VALUES (?)", (role,))
 
     # -----------------------------
     # アルバム × 人物 × 役割
     # -----------------------------
-    c.execute("""
+    c.execute(f"""
         CREATE TABLE IF NOT EXISTS album_people (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {other_id_type},
             album_id INTEGER,
             person_id INTEGER,
             role_id INTEGER,
@@ -111,9 +195,9 @@ def init_db():
     # -----------------------------
     # 曲 × 人物 × 役割
     # -----------------------------
-    c.execute("""
+    c.execute(f"""
         CREATE TABLE IF NOT EXISTS track_people (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {other_id_type},
             track_id INTEGER,
             person_id INTEGER,
             role_id INTEGER,
@@ -132,7 +216,7 @@ def init_db():
 # DB 操作（アルバム）
 # -----------------------------
 def add_album(catalog_no, title,  year, release_date, album_type, note, omnibus_flag=False, album_kana="", original_release_date=""):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         INSERT INTO albums (catalog_no, title, year, release_date, omnibus_flag, album_type, note, album_kana, original_release_date)
@@ -144,7 +228,7 @@ def add_album(catalog_no, title,  year, release_date, album_type, note, omnibus_
     return album_id
 
 def get_album(album_id):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         SELECT id, catalog_no, title, year, release_date, omnibus_flag, album_type, note, album_kana, original_release_date
@@ -156,7 +240,7 @@ def get_album(album_id):
     return result
 
 def get_albums():
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         SELECT id, catalog_no, title, year, release_date, omnibus_flag, album_type, note, album_kana, original_release_date
@@ -169,7 +253,7 @@ def get_albums():
 
 
 def get_album_artist_names(album_id):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         SELECT p.name
@@ -185,7 +269,7 @@ def get_album_artist_names(album_id):
 
 
 def get_all_tracks():
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         SELECT id, album_id, track_no, title, duration, note, track_kana, original_release_date
@@ -198,7 +282,7 @@ def get_all_tracks():
 
 
 def get_track_artist_names(track_id):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         SELECT p.name
@@ -214,7 +298,7 @@ def get_track_artist_names(track_id):
 
 
 def get_albums_by_person(person_id):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         SELECT
@@ -235,7 +319,7 @@ def get_albums_by_person(person_id):
     return result
 
 def update_album(album_id, catalog_no, title, year, release_date, album_type, note, omnibus_flag, album_kana="", original_release_date=""):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         UPDATE albums
@@ -249,7 +333,7 @@ def update_album(album_id, catalog_no, title, year, release_date, album_type, no
 # DB 操作（曲）
 # -----------------------------
 def add_track(album_id, track_no, title, duration, note, track_kana="", original_release_date=""):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         INSERT INTO tracks (album_id, track_no, title, duration, note, track_kana, original_release_date)
@@ -261,7 +345,7 @@ def add_track(album_id, track_no, title, duration, note, track_kana="", original
     return track_id
 
 def update_track(track_id, track_no, title, duration, note, track_kana="", original_release_date=""):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         UPDATE tracks
@@ -272,7 +356,7 @@ def update_track(track_id, track_no, title, duration, note, track_kana="", origi
     conn.close()
 
 def get_tracks_by_album(album_id):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         SELECT id, album_id, track_no, title, duration, note, track_kana, original_release_date
@@ -285,7 +369,7 @@ def get_tracks_by_album(album_id):
     return rows
 
 def get_track(track_id):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         SELECT id, album_id, track_no, title, duration, note, track_kana, original_release_date
@@ -297,7 +381,7 @@ def get_track(track_id):
     return row
 
 def delete_track(track_id):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     # delete related track_people rows
     c.execute("DELETE FROM track_people WHERE track_id = ?", (track_id,))
@@ -307,7 +391,7 @@ def delete_track(track_id):
     conn.close()
 
 def get_tracks_by_person(person_id):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         SELECT
@@ -330,7 +414,7 @@ def get_tracks_by_person(person_id):
 # DB 操作（曲 × 人物）
 # -----------------------------
 def add_track_people(track_id, person_id, role_id, instrument, note):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         INSERT INTO track_people (track_id, person_id, role_id, instrument, note)
@@ -340,7 +424,7 @@ def add_track_people(track_id, person_id, role_id, instrument, note):
     conn.close()
 
 def get_track_people(track_id):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         SELECT 
@@ -362,14 +446,14 @@ def get_track_people(track_id):
     return result
 
 def delete_track_people(tp_id):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("DELETE FROM track_people WHERE id = ?", (tp_id,))
     conn.commit()
     conn.close()
 
 def update_track_people(tp_id, person_id, role_id, instrument, note):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         UPDATE track_people
@@ -383,7 +467,7 @@ def update_track_people(tp_id, person_id, role_id, instrument, note):
 # DB 操作（アルバム × 役割 × 人物）
 # -----------------------------
 def add_album_people(album_id, person_id, role_id, instrument, note):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         INSERT INTO album_people (album_id, person_id, role_id, instrument, note)
@@ -393,7 +477,7 @@ def add_album_people(album_id, person_id, role_id, instrument, note):
     conn.close()
 
 def get_album_people(album_id):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         SELECT ap.id, ap.person_id, p.name, ap.role_id, r.role_name, ap.instrument, ap.note
@@ -408,7 +492,7 @@ def get_album_people(album_id):
     return result
 
 def delete_album_people(ap_id):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("DELETE FROM album_people WHERE id = ?", (ap_id,))
     conn.commit()
@@ -418,7 +502,7 @@ def delete_album_people(ap_id):
 # DB 操作（人物）
 # -----------------------------
 def get_people():
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("SELECT id, name, note FROM people ORDER BY name")
     result = c.fetchall()
@@ -426,7 +510,7 @@ def get_people():
     return result
 
 def add_person(name, note):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         INSERT INTO people (name, note)
@@ -436,7 +520,7 @@ def add_person(name, note):
     conn.close()
 
 def get_person(person_id):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("SELECT id, name, note FROM people WHERE id = ?", (person_id,))
     result = c.fetchone()
@@ -444,7 +528,7 @@ def get_person(person_id):
     return result
 
 def update_person(person_id, name, note):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         UPDATE people
@@ -455,7 +539,7 @@ def update_person(person_id, name, note):
     conn.close()
 
 def get_person_by_name(name):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("SELECT id, name, note FROM people WHERE name = ?", (name,))
     result = c.fetchone()
@@ -466,7 +550,7 @@ def get_person_by_name(name):
 # DB 操作（役割）
 # -----------------------------
 def get_roles():
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("SELECT id, role_name FROM roles ORDER BY role_name")
     result = c.fetchall()
@@ -474,7 +558,7 @@ def get_roles():
     return result
 
 def get_role_by_name(role_name):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("""
         SELECT id, role_name
@@ -486,7 +570,7 @@ def get_role_by_name(role_name):
     return result
 
 def add_role(role_name):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect_db()
     c = conn.cursor()
     c.execute("INSERT OR IGNORE INTO roles (role_name) VALUES (?)", (role_name,))
     conn.commit()
@@ -502,7 +586,24 @@ def add_role(role_name):
 st.set_page_config(page_title="CD / 曲データ管理アプリ", layout="wide")
 st.title("🎵 CD / 曲データ管理アプリ")
 
-init_db()
+try:
+    init_db()
+except Exception as exc:
+    masked = str(DATABASE_URL)
+    if DATABASE_URL:
+        try:
+            prefix, rest = DATABASE_URL.split("://", 1)
+            if "@" in rest:
+                userinfo, hostpart = rest.rsplit("@", 1)
+                user, password = userinfo.split(":", 1)
+                masked = f"{prefix}://{user}:***@{hostpart}"
+            else:
+                masked = f"{prefix}://***@{rest}"
+        except Exception:
+            pass
+    st.error(f"データベース接続に失敗しました。詳細: {exc}")
+    st.code(f"DATABASE_URL={masked}")
+    st.stop()
 
 # initialize session state defaults
 if "view" not in st.session_state:
@@ -1669,7 +1770,7 @@ elif st.session_state.view == "track_register":
                 if 'track_artist_name_input' in locals() or 'track_artist_name_input' in globals():
                     provided_name = track_artist_name_input.strip() if track_artist_name_input else ""
                 # remove existing if empty
-                conn = sqlite3.connect(DB_NAME)
+                conn = connect_db()
                 c = conn.cursor()
                 c.execute("SELECT id, person_id FROM track_people WHERE track_id = ? AND role_id = ?", (selected_id, role_id))
                 row = c.fetchone()
@@ -1971,7 +2072,7 @@ elif st.session_state.view == "track_register":
                     add_person(name, person_note or "")
                     pid = get_person_by_name(name)[0]
                 # avoid duplicate association
-                conn = sqlite3.connect(DB_NAME)
+                conn = connect_db()
                 c = conn.cursor()
                 c.execute("""
                     SELECT id FROM track_people WHERE track_id = ? AND person_id = ? AND role_id = ?
