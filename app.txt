@@ -1,0 +1,854 @@
+import streamlit as st
+import sqlite3
+import datetime as dt
+
+DB_NAME = "music.db"
+
+# -----------------------------
+# DB 初期化
+# -----------------------------
+def init_db():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+
+    # アルバム
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS albums (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            catalog_no TEXT,
+            title TEXT NOT NULL,
+            artist TEXT,
+            year INTEGER,
+            release_date TEXT,
+            omnibus_flag BOOLEAN DEFAULT FALSE,
+            album_type TEXT,
+            note TEXT
+        )
+    """)
+
+    # 曲
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS tracks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            album_id INTEGER,
+            track_no INTEGER,
+            title TEXT NOT NULL,
+            artist TEXT,
+            composer TEXT,
+            arranger TEXT,
+            lyricist TEXT,
+            duration TEXT,
+            note TEXT,
+            FOREIGN KEY(album_id) REFERENCES albums(id)
+        )
+    """)
+
+    # ミュージシャン
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS musicians (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            note TEXT
+        )
+    """)
+
+    # アーティスト
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS artists (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            note TEXT
+        )
+    """)
+
+    # 曲 × ミュージシャン × 楽器
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS track_musicians (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            track_id INTEGER,
+            musician_id INTEGER,
+            instrument TEXT,
+            note TEXT,
+            FOREIGN KEY(track_id) REFERENCES tracks(id),
+            FOREIGN KEY(musician_id) REFERENCES musicians(id)
+        )
+    """)
+
+    # アルバム × 演奏者 × 楽器（新規）
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS album_musicians (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            album_id INTEGER,
+            musician_id INTEGER,
+            instrument TEXT,
+            note TEXT,
+            FOREIGN KEY(album_id) REFERENCES albums(id),
+            FOREIGN KEY(musician_id) REFERENCES musicians(id)
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+# -----------------------------
+# DB 操作（アルバム）
+# -----------------------------
+def add_album(catalog_no, title, artist, year, release_date, album_type, note, omnibus_flag=False):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO albums (catalog_no, title, artist, year, release_date, omnibus_flag, album_type, note)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (catalog_no, title, artist, year, release_date, omnibus_flag, album_type, note))
+    conn.commit()
+    conn.close()
+
+def get_albums():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT id, catalog_no, title, artist, year, release_date, omnibus_flag, album_type, note FROM albums")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def get_album(album_id):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("""
+        SELECT id, catalog_no, title, artist, year, release_date, omnibus_flag, album_type, note
+        FROM albums
+        WHERE id = ?
+    """, (album_id,))
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def update_album(album_id, catalog_no, title, artist, year, release_date, album_type, note, omnibus_flag):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("""
+        UPDATE albums
+        SET catalog_no=?, title=?, artist=?, year=?, release_date=?, album_type=?, note=?, omnibus_flag=?
+        WHERE id=?
+    """, (catalog_no, title, artist, year, release_date, album_type, note, omnibus_flag, album_id))
+    conn.commit()
+    conn.close()
+
+# -----------------------------
+# DB 操作（曲）
+# -----------------------------
+def add_track(album_id, track_no, title, artist, composer, arranger, lyricist, duration, note):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO tracks (album_id, track_no, title, artist, composer, arranger, lyricist, duration, note)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (album_id, track_no, title, artist, composer, arranger, lyricist, duration, note))
+    conn.commit()
+    conn.close()
+
+def update_track(track_id, track_no, title, artist, composer, arranger, lyricist, duration, note):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("""
+        UPDATE tracks
+        SET track_no=?, title=?, artist=?, composer=?, arranger=?, lyricist=?, duration=?, note=?
+        WHERE id=?
+    """, (track_no, title, artist, composer, arranger, lyricist, duration, note, track_id))
+    conn.commit()
+    conn.close()
+
+def get_tracks_by_album(album_id):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("""
+        SELECT id, track_no, title, duration, lyricist, composer, arranger, artist, note
+        FROM tracks
+        WHERE album_id = ?
+        ORDER BY track_no ASC
+    """, (album_id,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def get_track(track_id):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("""
+        SELECT id, album_id, track_no, title, artist, composer, arranger, lyricist, duration, note
+        FROM tracks
+        WHERE id = ?
+    """, (track_id,))
+    row = c.fetchone()
+    conn.close()
+    return row
+
+# -----------------------------
+# DB 操作（ミュージシャン）
+# -----------------------------
+def add_musician(name, note):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("INSERT INTO musicians (name, note) VALUES (?, ?)", (name, note))
+    conn.commit()
+    conn.close()
+
+def get_musicians():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT id, name, note FROM musicians")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+# -----------------------------
+# DB 操作（曲 × ミュージシャン）
+# -----------------------------
+def add_track_musician(track_id, musician_id, instrument, note):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO track_musicians (track_id, musician_id, instrument, note)
+        VALUES (?, ?, ?, ?)
+    """, (track_id, musician_id, instrument, note))
+    conn.commit()
+    conn.close()
+
+def get_track_musicians(track_id):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("""
+        SELECT tm.id, m.name, tm.instrument, tm.note
+        FROM track_musicians tm
+        LEFT JOIN musicians m ON tm.musician_id = m.id
+        WHERE tm.track_id = ?
+    """, (track_id,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+# -----------------------------
+# DB 操作（アルバム × ミュージシャン）
+# -----------------------------
+def add_album_musician(album_id, musician_id, instrument, note):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO album_musicians (album_id, musician_id, instrument, note)
+        VALUES (?, ?, ?, ?)
+    """, (album_id, musician_id, instrument, note))
+    conn.commit()
+    conn.close()
+
+def get_album_musicians(album_id):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("""
+        SELECT am.id, m.name, am.instrument, am.note, am.musician_id
+        FROM album_musicians am
+        LEFT JOIN musicians m ON am.musician_id = m.id
+        WHERE am.album_id = ?
+    """, (album_id,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def delete_album_musician(album_musician_id):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("DELETE FROM album_musicians WHERE id = ?", (album_musician_id,))
+    conn.commit()
+    conn.close()
+
+# -----------------------------
+# DB 操作（アーティスト）
+# -----------------------------
+def add_artist(name, note=""):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO artists (name, note)
+        VALUES (?, ?)
+    """, (name, note))
+    conn.commit()
+    conn.close()
+
+def get_artists():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT id, name, note FROM artists ORDER BY name ASC")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def get_artist_by_name(name):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT id, name, note FROM artists WHERE name = ?", (name,))
+    row = c.fetchone()
+    conn.close()
+    return row
+
+# -----------------------------
+# Streamlit UI
+# -----------------------------
+st.title("🎵 CD / 曲データ管理アプリ")
+
+init_db()
+
+if "view" not in st.session_state:
+    st.session_state.view = "album_list"
+if "current_album_id" not in st.session_state:
+    st.session_state.current_album_id = None
+if "current_track_id" not in st.session_state:
+    st.session_state.current_track_id = None
+
+menu = st.sidebar.selectbox(
+    "メニュー",
+    [
+        "アルバム編集",
+        "ミュージシャン登録"
+        "アーティスト一覧"
+    ]
+)
+
+# -----------------------------
+# ミュージシャン登録
+# -----------------------------
+if menu == "ミュージシャン登録":
+    st.header("👤 ミュージシャン登録")
+
+    name = st.text_input("名前")
+    note = st.text_input("備考（所属バンドなど）")
+
+    if st.button("登録"):
+        if name:
+            add_musician(name, note)
+            st.success("登録しました")
+        else:
+            st.error("名前は必須です")
+
+# -----------------------------
+# アルバム編集（アルバム情報＋曲一覧）
+# -----------------------------
+elif menu == "アルバム編集":
+    # -----------------------------
+    # アルバム一覧画面（新規追加）
+    # -----------------------------
+    if st.session_state.view == "album_list":
+        st.header("📚 アルバム一覧")
+
+        albums = get_albums()
+
+        if not albums:
+            st.info("登録されているアルバムはありません。")
+        else:
+            for a in albums:
+                album_id = a[0]
+                title = a[2]
+                artist = a[3]
+
+                # アルバム名をクリックすると編集画面へ
+                if st.button(f"{title}（{artist}）", key=f"album_{album_id}"):
+                    st.session_state.current_album_id = album_id
+                    st.session_state.view = "album_edit"
+                    st.rerun()
+
+        st.markdown("---")
+
+        # 新規登録ボタン
+        if st.button("＋ 新規アルバムを登録"):
+            st.session_state.view = "album_register"
+            st.rerun()
+
+    # アルバム登録
+    elif st.session_state.view == "album_register":
+        st.header("📀 アルバム登録")
+
+        catalog_no = st.text_input("品番")
+        title = st.text_input("アルバム名")
+
+        # --- アーティスト選択 UI（既存＋新規） ---
+        artists = get_artists()  # [(id, name, note), ...]
+        artist_names = [a[1] for a in artists]
+
+        selected_artist = st.selectbox(
+            "アーティスト（既存）",
+            ["新規入力"] + artist_names
+        )
+
+        if selected_artist == "新規入力":
+            artist = st.text_input("新規アーティスト名")
+        else:
+            artist = selected_artist
+
+        omnibus_flag = st.checkbox("オムニバスアルバム（複数アーティスト）")
+        if omnibus_flag:
+            artist = "オムニバス"
+
+        album_type_options = ["アルバム", "シングル"]
+        album_type = st.selectbox("種別", album_type_options)
+
+        min_date = dt.date(1960, 1, 1)
+        max_date = dt.datetime.today().date()
+        release_date = st.date_input("発売日", min_value=min_date, max_value=max_date, value=None)
+        release_date_str = release_date.strftime("%Y-%m-%d") if release_date else ""
+
+        if release_date:
+            year = release_date.year
+            st.number_input("発売年（release_dateの年を自動設定）", value=year, min_value=1960, max_value=dt.datetime.today().year, disabled=True)
+        else:
+            year = st.number_input("発売年", min_value=1960, max_value=dt.datetime.today().year, step=1)
+
+        note = st.text_area("備考")
+
+        if st.button("登録"):
+            if title:
+        
+                # --- アーティスト自動登録（空でなければ登録） ---
+                if artist:  # 空文字の場合は登録しない
+                    artist_row = get_artist_by_name(artist)
+                    if not artist_row:
+                        add_artist(artist)
+
+                add_album(catalog_no, title, artist, year, release_date_str, album_type, note, omnibus_flag)
+
+                st.success("登録しました")
+                st.session_state.view = "album_list"
+                st.rerun()
+            else:
+                st.error("アルバム名は必須です")
+
+    # アルバム選択
+    elif st.session_state.view == "album_edit":
+        st.header("📀 アルバム編集")
+
+        # アルバム選択
+        albums = get_albums()
+        album_dict = {f"{a[2]}（{a[3]}）": a[0] for a in albums}
+
+        if len(album_dict) == 0:
+            st.warning("アルバムがありません")
+        else:
+            selected_label = st.selectbox("編集するアルバム", list(album_dict.keys()))
+            st.session_state.current_album_id = album_dict[selected_label]
+            album = get_album(st.session_state.current_album_id)
+
+            # 上部：アルバム情報表示・編集
+            st.subheader("アルバム情報")
+
+            catalog_no = st.text_input("品番", value=album[1] or "")
+            title = st.text_input("アルバム名", value=album[2] or "")
+
+            # --- アーティスト選択 UI（既存＋新規） ---
+            artists = get_artists()  # [(id, name, note), ...]
+            artist_names = [a[1] for a in artists]
+
+            # 現在のアーティスト名（DBの値）
+            current_artist = album[3] or ""
+
+            # selectbox の初期選択を決める
+            if current_artist and current_artist in artist_names:
+                default_index = artist_names.index(current_artist) + 1  # 「新規入力」が先頭なので +1
+            else:
+                default_index = 0  # 新規入力
+
+            selected_artist = st.selectbox(
+                "アーティスト（既存）",
+                ["新規入力"] + artist_names,
+                index=default_index
+            )
+
+            if selected_artist == "新規入力":
+                artist = st.text_input("新規アーティスト名", value=current_artist)
+            else:
+                artist = selected_artist
+
+            # 発売日
+            release_date_val = None
+            if album[5]:
+                try:
+                    release_date_val = dt.datetime.strptime(album[5], "%Y-%m-%d").date()
+                except:
+                    release_date_val = None
+
+            min_date = dt.date(1960, 1, 1)
+            max_date = dt.datetime.today().date()
+            release_date = st.date_input(
+                "発売日",
+                value=release_date_val,
+                min_value=min_date,
+                max_value=max_date
+            )
+            release_date_str = release_date.strftime("%Y-%m-%d") if release_date else ""
+
+            # 発売年
+            if release_date:
+                year = release_date.year
+                year_input = st.number_input("発売年（release_dateの年を自動設定）", value=year, min_value=1960, max_value=dt.datetime.today().year, disabled=True)
+            else:
+                year_input = st.number_input("発売年", min_value=1960, max_value=dt.datetime.today().year, value=album[4] or 1960)
+
+            album_type_options = ["アルバム", "シングル"]
+            current_type = album[7] if album[7] in album_type_options else album_type_options[0]
+            album_type = st.selectbox("種別", album_type_options, index=album_type_options.index(current_type))
+
+            note = st.text_area("備考", value=album[8] or "")
+
+            omnibus_flag = st.checkbox("オムニバスアルバム（複数アーティスト）", value=bool(album[6]))
+            if omnibus_flag:
+                artist = "オムニバス"
+
+            if st.button("アルバム情報を更新"):
+
+                # --- アーティスト自動登録（空でなければ登録） ---
+                if artist:
+                    artist_row = get_artist_by_name(artist)
+                    if not artist_row:
+                        add_artist(artist)
+
+                update_album(album[0], catalog_no, title, artist, year_input, release_date_str, album_type, note, omnibus_flag)
+                st.success("アルバム情報を更新しました")
+
+            if st.button("アルバム一覧に戻る"):
+                st.session_state.view = "album_list"
+                st.rerun()
+
+            # -----------------------------
+            # アルバム演奏者一覧
+            # -----------------------------
+            st.subheader("アルバム演奏者一覧")
+
+            album_musicians = get_album_musicians(album[0])
+
+            if album_musicians:
+                for am in album_musicians:
+                    am_id = am[0]
+                    name = am[1]
+                    instrument = am[2]
+                    am_note = am[3]
+
+                    cols = st.columns([2, 2, 4, 2])
+                    cols[0].write(instrument or "")
+                    cols[1].write(name or "")
+                    cols[2].write(am_note or "")
+                    if cols[3].button("削除", key=f"delete_am_{am_id}"):
+                        delete_album_musician(am_id)
+                        st.success("削除しました")
+                        st.rerun()
+            else:
+                st.write("演奏者が登録されていません")
+
+            if st.button("演奏者を追加"):
+                st.session_state.view = "album_musician_edit"
+                st.rerun()
+
+            # -----------------------------
+            # 曲一覧
+            # -----------------------------
+            st.subheader("曲一覧")
+
+            tracks = get_tracks_by_album(album[0])
+            if tracks:
+                for t in tracks:
+                    track_id = t[0]
+                    track_no = t[1]
+                    title = t[2]
+                    duration = t[3]
+                    lyricist = t[4]
+                    composer = t[5]
+                    arranger = t[6]
+
+                    cols = st.columns([1, 3, 2, 2, 2, 2])
+                    cols[0].write(track_no if track_no is not None else "")
+                    if cols[1].button(title, key=f"track_title_{track_id}"):
+                        st.session_state.current_track_id = track_id
+                        st.session_state.view = "track_edit"
+                        st.rerun()
+                    cols[2].write(duration or "")
+                    cols[3].write(lyricist or "")
+                    cols[4].write(composer or "")
+                    cols[5].write(arranger or "")
+            else:
+                st.write("曲が登録されていません")
+
+            if st.button("曲を追加"):
+                st.session_state.current_track_id = None
+                st.session_state.view = "track_edit"
+                st.rerun()
+
+    # 曲編集画面
+    elif st.session_state.view == "track_edit":
+        st.header("🎵 曲編集")
+        album = get_album(st.session_state.current_album_id)
+        st.markdown(f"**アルバム：{album[2]}（{album[3]}）**")
+
+        # -----------------------------
+        # 曲データ取得（新規 or 既存）
+        # -----------------------------
+        if st.session_state.current_track_id:
+            track = get_track(st.session_state.current_track_id)
+            track_id = track[0]
+            album_id = track[1]
+        else:
+            track = None
+            track_id = None
+            album_id = st.session_state.current_album_id
+
+        # -----------------------------
+        # 曲編集画面に入ったタイミングで同期処理
+        # -----------------------------
+        album_musicians = get_album_musicians(album_id)
+        track_musicians = get_track_musicians(track_id) if track_id else []
+
+        # 曲レベルの演奏者を辞書化（楽器＋演奏者ID）
+        track_mus_dict = {(tm[1], tm[2]): tm for tm in track_musicians}
+
+        # アルバム演奏者を曲レベルに自動追加
+        if track_id:
+            for am in album_musicians:
+                am_id = am[0]
+                am_name = am[1]
+                am_instrument = am[2]
+                am_note = am[3]
+                am_musician_id = am[4]
+
+                key = (am_name, am_instrument)
+
+                if key not in track_mus_dict:
+                    add_track_musician(track_id, am_musician_id, am_instrument, am_note)
+
+            # アルバム演奏者が削除されていたら曲レベルからも削除
+            album_keys = {(am[1], am[2]) for am in album_musicians}
+
+            for tm in track_musicians:
+                tm_id = tm[0]
+                tm_name = tm[1]
+                tm_instrument = tm[2]
+                tm_note = tm[3]
+
+                key = (tm_name, tm_instrument)
+
+                # 曲レベル独自の演奏者は残す
+                if key not in album_keys:
+                    continue
+
+                # アルバム演奏者に存在する → そのまま残す
+                # （削除されていた場合は album_keys に存在しないので上で continue される）
+
+        # -----------------------------
+        # 曲情報入力欄
+        # -----------------------------
+        if track:
+            track_no = st.number_input("曲番号", min_value=1, max_value=99, value=track[2] or 1)
+            title = st.text_input("曲名", value=track[3] or "")
+
+            # --- アーティスト選択 UI（既存＋新規） ---
+            artists = get_artists()
+            artist_names = [a[1] for a in artists]
+
+            if track:
+                current_artist = track[4] or ""
+            else:
+                current_artist = album[3] if album[6] == 0 else ""
+
+            if current_artist and current_artist in artist_names:
+                default_index = artist_names.index(current_artist) + 1
+            else:
+                default_index = 0
+
+            selected_artist = st.selectbox(
+                "アーティスト（既存）",
+                ["新規入力"] + artist_names,
+                index=default_index
+            )
+
+            if selected_artist == "新規入力":
+                artist = st.text_input("新規アーティスト名", value=current_artist)
+            else:
+                artist = selected_artist
+
+            lyricist = st.text_input("作詞者", value=track[7] or "")
+            composer = st.text_input("作曲者", value=track[5] or "")
+            arranger = st.text_input("編曲者", value=track[6] or "")
+            duration = st.text_input("演奏時間（例：03:45）", value=track[8] or "")
+            note = st.text_area("備考", value=track[9] or "")
+        else:
+            track_no = st.number_input("曲番号", min_value=1, max_value=99, value=1)
+            title = st.text_input("曲名")
+
+            # --- アーティスト選択 UI（既存＋新規） ---
+            artists = get_artists()
+            artist_names = [a[1] for a in artists]
+
+            if track:
+                current_artist = track[4] or ""
+            else:
+                current_artist = album[3] if album[6] == 0 else ""
+
+            if current_artist and current_artist in artist_names:
+                default_index = artist_names.index(current_artist) + 1
+            else:
+                default_index = 0
+
+            selected_artist = st.selectbox(
+                "アーティスト（既存）",
+                ["新規入力"] + artist_names,
+                index=default_index
+            )
+
+            if selected_artist == "新規入力":
+                artist = st.text_input("新規アーティスト名", value=current_artist)
+            else:
+                artist = selected_artist
+
+            lyricist = st.text_input("作詞者")
+            composer = st.text_input("作曲者")
+            arranger = st.text_input("編曲者")
+            duration = st.text_input("演奏時間（例：03:45）")
+            note = st.text_area("備考")
+
+        # -----------------------------
+        # 曲保存
+        # -----------------------------
+        if st.button("曲を保存"):
+            if title:
+                if track_id:
+                    update_track(track_id, track_no, title, artist, composer, arranger, lyricist, duration, note)
+                else:
+                    add_track(album_id, track_no, title, artist, composer, arranger, lyricist, duration, note)
+                st.success("曲情報を保存しました")
+                st.rerun()
+            else:
+                st.error("曲名は必須です")
+
+        # -----------------------------
+        # 演奏者一覧（アルバム＋曲）
+        # -----------------------------
+        st.subheader("演奏者一覧")
+
+        st.write("### アルバム演奏者（編集不可）")
+        for am in album_musicians:
+            st.write(f"- {am[2]}：{am[1]}（{am[3]}）")
+
+        st.write("### 曲演奏者（追加分のみ編集可能）")
+        track_musicians = get_track_musicians(track_id)
+        for tm in track_musicians:
+            key = (tm[1], tm[2])
+            if key not in {(am[1], am[2]) for am in album_musicians}:
+                st.write(f"- {tm[2]}：{tm[1]}（{tm[3]}）")
+
+        # -----------------------------
+        # 曲演奏者追加
+        # -----------------------------
+        if st.button("演奏者を追加"):
+            st.session_state.view = "track_musician_edit"
+            st.rerun()
+        elif not track_id:
+            st.info("曲を保存すると演奏者を追加できるようになります")
+
+        # -----------------------------
+        # 戻るボタン
+        # -----------------------------
+        if st.button("アルバム編集に戻る"):
+            st.session_state.view = "album_edit"
+            st.rerun()
+
+    elif st.session_state.view == "album_musician_edit":
+        st.header("🎸 アルバム演奏者追加")
+
+        album = get_album(st.session_state.current_album_id)
+        st.markdown(f"**アルバム：{album[2]}（{album[3]}）**")
+
+        # 入力欄（一覧はアルバム編集画面に表示するためここでは出さない）
+        instrument = st.text_input("楽器")
+        musicians = get_musicians()
+        musician_dict = {m[1]: m[0] for m in musicians}
+
+        if musician_dict:
+            musician_name = st.selectbox("演奏者", list(musician_dict.keys()))
+            musician_id = musician_dict[musician_name]
+        else:
+            st.warning("ミュージシャンが登録されていません。先にミュージシャン登録を行ってください。")
+            musician_id = None
+
+        am_note = st.text_input("備考")
+
+        if st.button("演奏者を追加"):
+            if instrument and musician_id:
+                add_album_musician(album[0], musician_id, instrument, am_note)
+                st.success("演奏者を追加しました")
+                st.session_state.view = "album_edit"
+                st.rerun()
+            else:
+                st.error("楽器と演奏者は必須です")
+
+        if st.button("アルバム編集に戻る"):
+            st.session_state.view = "album_edit"
+            st.rerun()
+    
+    # 演奏者編集画面
+    elif st.session_state.view == "track_musician_edit":
+        st.header("🎸 曲演奏者追加")
+
+        track = get_track(st.session_state.current_track_id)
+        album = get_album(st.session_state.current_album_id)
+
+        st.markdown(f"**アルバム：{album[2]}（{album[3]}）**")
+        st.markdown(f"**曲：{track[3]}（トラック {track[2]}）**")
+
+        # 入力欄（一覧は曲編集画面に表示するためここでは出さない）
+        instrument = st.text_input("楽器")
+        musicians = get_musicians()
+        musician_dict = {m[1]: m[0] for m in musicians}
+
+        if musician_dict:
+            musician_name = st.selectbox("演奏者", list(musician_dict.keys()))
+            musician_id = musician_dict[musician_name]
+        else:
+            st.warning("ミュージシャンが登録されていません。先にミュージシャン登録を行ってください。")
+            musician_id = None
+
+        tm_note = st.text_input("備考")
+
+        if st.button("演奏者を追加"):
+            if instrument and musician_id:
+                add_track_musician(track[0], musician_id, instrument, tm_note)
+                st.success("演奏者を追加しました")
+                st.session_state.view = "track_edit"
+                st.rerun()
+            else:
+                st.error("楽器と演奏者は必須です")
+
+        if st.button("曲編集に戻る"):
+            st.session_state.view = "track_edit"
+            st.rerun()
+
+elif menu == "アーティスト一覧":
+    st.header("🎤 アーティスト一覧")
+
+    artists = get_artists()
+
+    if not artists:
+        st.info("登録されているアーティストはありません。")
+    else:
+        for a in artists:
+            artist_id = a[0]
+            name = a[1]
+            note = a[2]
+
+            # アーティスト名をリンクにする
+            link = st.markdown(
+                f"<a style='font-size: 18px; text-decoration: none;' href='javascript:window.location.href=\"?artist_id={artist_id}\"'>{name}</a>",
+                unsafe_allow_html=True
+            )
+
+            # 備考
+            st.write(note or "")
+
+            # リンククリック時の処理
+            params = st.query_params
+            if "artist_id" in params and int(params["artist_id"]) == artist_id:
+                st.session_state.current_artist_id = artist_id
+                st.session_state.view = "artist_edit"
+                st.rerun()
