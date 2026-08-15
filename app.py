@@ -1598,7 +1598,7 @@ elif st.session_state.view == "album_edit":
     release_date_val = None
     if album[4]:
         try:
-            release_date_val = dt.datetime.strptime(album[4], "%Y-%m-%d").date()
+            release_date_val = dt.datetime.strptime(album[4], "%Y/%m/%d").date()
         except ValueError:
             release_date_val = None
     
