@@ -602,6 +602,7 @@ def add_album_people(album_id, person_id, role_id, instrument, note):
     try:
         if USE_POSTGRES:
             # use Postgres upsert-free pattern to avoid race conditions
+            # Use parameter style for psycopg by providing the SQL with %s placeholders directly to the underlying cursor
             c.execute(
                 "INSERT INTO album_people (album_id, person_id, role_id, instrument, note) VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
                 (album_id, person_id, role_id, instrument, note)
@@ -624,6 +625,29 @@ def add_album_people(album_id, person_id, role_id, instrument, note):
         conn.close()
 
     # rowcount is 1 if a row was inserted, 0 if ignored due to conflict
+    return bool(inserted)
+
+
+# New helper: atomically set the artist for an album (delete existing artist-role rows and insert new one in a single transaction)
+def set_album_artist(album_id, person_id, role_id, instrument, note):
+    conn = connect_db()
+    c = conn.cursor()
+    try:
+        # Begin transaction is implicit; ensure operations use same connection
+        # Delete existing rows for this album & role
+        c.execute("DELETE FROM album_people WHERE album_id = ? AND role_id = ?", (album_id, role_id))
+        # Insert new artist
+        c.execute("INSERT INTO album_people (album_id, person_id, role_id, instrument, note) VALUES (?, ?, ?, ?, ?)",
+                  (album_id, person_id, role_id, instrument, note))
+        conn.commit()
+        inserted = c.rowcount
+    except Exception as exc:
+        # Log and re-raise unexpected errors
+        print(f"set_album_artist: unexpected error for album_id={album_id}, person_id={person_id}, role_id={role_id}: {exc}")
+        conn.close()
+        raise
+    finally:
+        conn.close()
     return bool(inserted)
 
 def get_album_people(album_id):
@@ -1629,14 +1653,14 @@ elif st.session_state.view == "album_edit":
             if ap[4] == "Artist":
                 delete_album_people(ap[0])  # ap.id
 
-        # 2. 新しい Artist を追加
+        # 2. 新しい Artist を追加（削除と挿入を原子的に実行）
         role_row = get_role_by_name("Artist")
         role_id = role_row[0]
-        added = add_album_people(album[0], selected_artist_id, role_id, "", "")
-        if added:
+        updated = set_album_artist(album[0], selected_artist_id, role_id, "", "")
+        if updated:
             st.success("アルバム情報を更新しました（アーティストを更新しました）")
         else:
-            st.warning("アーティストの更新が適用されませんでした（既に同じ情報があるか、DB 側で挿入が抑制されました）。ログを確認してください。")
+            st.warning("アーティストの更新が適用されませんでした（挿入が抑制されました）。ログを確認してください。")
         #st.rerun()
 
     st.markdown("---")
