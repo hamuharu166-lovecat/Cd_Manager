@@ -522,29 +522,26 @@ def add_track_people(track_id, person_id, role_id, instrument, note):
         return None
 
     try:
-        c.execute("""
-            INSERT INTO track_people (track_id, person_id, role_id, instrument, note)
-            VALUES (?, ?, ?, ?, ?)
-        """, (track_id, person_id, role_id, instrument, note))
+        if USE_POSTGRES:
+            c.execute(
+                "INSERT INTO track_people (track_id, person_id, role_id, instrument, note) VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                (track_id, person_id, role_id, instrument, note)
+            )
+            inserted = c.rowcount
+        else:
+            c.execute(
+                "INSERT OR IGNORE INTO track_people (track_id, person_id, role_id, instrument, note) VALUES (?, ?, ?, ?, ?)",
+                (track_id, person_id, role_id, instrument, note)
+            )
+            inserted = c.rowcount
         conn.commit()
     except Exception as exc:
-        try:
-            import psycopg
-            from psycopg.errors import UniqueViolation
-        except Exception:
-            psycopg = None
-            UniqueViolation = None
-        if UniqueViolation is not None and isinstance(exc, UniqueViolation):
-            conn.close()
-            return None
-        import sqlite3 as _sqlite
-        if isinstance(exc, _sqlite.IntegrityError):
-            conn.close()
-            return None
+        print(f"add_track_people: unexpected error inserting track_id={track_id}, person_id={person_id}, role_id={role_id}: {exc}")
         conn.close()
         raise
-    conn.close()
-    return True
+    finally:
+        conn.close()
+    return bool(inserted)
 
 def get_track_people(track_id):
     conn = connect_db()
@@ -609,20 +606,25 @@ def add_album_people(album_id, person_id, role_id, instrument, note):
                 "INSERT INTO album_people (album_id, person_id, role_id, instrument, note) VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
                 (album_id, person_id, role_id, instrument, note)
             )
+            inserted = c.rowcount
         else:
             # SQLite: use INSERT OR IGNORE to avoid unique constraint errors
             c.execute(
                 "INSERT OR IGNORE INTO album_people (album_id, person_id, role_id, instrument, note) VALUES (?, ?, ?, ?, ?)",
                 (album_id, person_id, role_id, instrument, note)
             )
+            inserted = c.rowcount
         conn.commit()
     except Exception as exc:
         # If unexpected error, log and re-raise
         print(f"add_album_people: unexpected error inserting album_id={album_id}, person_id={person_id}, role_id={role_id}: {exc}")
         conn.close()
         raise
-    conn.close()
-    return True
+    finally:
+        conn.close()
+
+    # rowcount is 1 if a row was inserted, 0 if ignored due to conflict
+    return bool(inserted)
 
 def get_album_people(album_id):
     conn = connect_db()
