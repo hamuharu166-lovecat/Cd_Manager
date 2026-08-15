@@ -239,17 +239,116 @@ def get_album(album_id):
     conn.close()
     return result
 
-def get_albums():
+@st.cache_data(ttl=120)
+def load_albums_page(limit=50, offset=0, search_artist=None, search_title=None):
     conn = connect_db()
     c = conn.cursor()
-    c.execute("""
-        SELECT id, catalog_no, title, year, release_date, omnibus_flag, album_type, note, album_kana, original_release_date
-        FROM albums
-        ORDER BY title
-    """)
-    result = c.fetchall()
+
+    # Fast path for artist search on Postgres: first resolve matching person ids using trigram index,
+    # then restrict album_people to those person_ids and artist role to avoid large joins.
+    params = []
+
+    if search_artist and USE_POSTGRES:
+        # get matching person ids
+        person_ids = get_person_ids_by_name(search_artist)
+        if not person_ids:
+            conn.close()
+            return []
+        artist_role_id = get_artist_role_id()
+        sql = """
+            SELECT a.id, a.catalog_no, a.title, a.year, a.release_date,
+                COALESCE(string_agg(p.name, ', ' ORDER BY p.name) FILTER (WHERE r.role_name = 'Artist'), '') AS artists
+            FROM albums a
+            JOIN album_people ap ON ap.album_id = a.id AND ap.role_id = ? AND ap.person_id = ANY(?)
+            LEFT JOIN roles r ON ap.role_id = r.id
+            LEFT JOIN people p ON ap.person_id = p.id
+            GROUP BY a.id
+            ORDER BY artists, COALESCE(a.release_date, a.year::text), a.title
+            LIMIT ? OFFSET ?
+        """
+        params = [artist_role_id, tuple(person_ids), limit, offset]
+        c.execute(sql, params)
+        rows = c.fetchall()
+        conn.close()
+        return rows
+
+    # Fallback / generic path (handles title search and SQLite)
+    where_clauses = []
+    if search_title:
+        where_clauses.append("lower(a.title) LIKE ?")
+        params.append(f"%{search_title.lower()}%")
+
+    where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+
+    if USE_POSTGRES:
+        sql = f"""
+            SELECT a.id, a.catalog_no, a.title, a.year, a.release_date,
+                COALESCE(string_agg(p.name, ', ' ORDER BY p.name) FILTER (WHERE r.role_name = 'Artist'), '') AS artists
+            FROM albums a
+            LEFT JOIN album_people ap ON ap.album_id = a.id
+            LEFT JOIN roles r ON ap.role_id = r.id
+            LEFT JOIN people p ON ap.person_id = p.id
+            WHERE {where_sql}
+            GROUP BY a.id
+            ORDER BY artists, COALESCE(a.release_date, a.year::text), a.title
+            LIMIT ? OFFSET ?
+        """
+    else:
+        sql = f"""
+            SELECT a.id, a.catalog_no, a.title, a.year, a.release_date,
+                COALESCE(GROUP_CONCAT(DISTINCT CASE WHEN r.role_name='Artist' THEN p.name END), '') AS artists
+            FROM albums a
+            LEFT JOIN album_people ap ON ap.album_id = a.id
+            LEFT JOIN roles r ON ap.role_id = r.id
+            LEFT JOIN people p ON ap.person_id = p.id
+            WHERE {where_sql}
+            GROUP BY a.id
+            ORDER BY artists, COALESCE(a.release_date, a.year), a.title
+            LIMIT ? OFFSET ?
+        """
+
+    params.extend([limit, offset])
+    c.execute(sql, params)
+    rows = c.fetchall()
     conn.close()
-    return result
+    return rows
+
+
+def count_albums(search_artist=None, search_title=None):
+    conn = connect_db()
+    c = conn.cursor()
+
+    # If searching by artist on Postgres, leverage person id resolution for efficiency
+    params = []
+    if search_artist and USE_POSTGRES:
+        person_ids = get_person_ids_by_name(search_artist)
+        if not person_ids:
+            conn.close()
+            return 0
+        artist_role_id = get_artist_role_id()
+        sql = "SELECT COUNT(DISTINCT a.id) FROM albums a JOIN album_people ap ON ap.album_id = a.id AND ap.role_id = ? AND ap.person_id = ANY(?)"
+        params = [artist_role_id, tuple(person_ids)]
+        c.execute(sql, params)
+        row = c.fetchone()
+        conn.close()
+        return row[0] if row else 0
+
+    where_clauses = []
+    if search_title:
+        where_clauses.append("lower(a.title) LIKE ?")
+        params.append(f"%{search_title.lower()}%")
+    where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+
+    sql = f"SELECT COUNT(DISTINCT a.id) FROM albums a LEFT JOIN album_people ap ON ap.album_id = a.id LEFT JOIN roles r ON ap.role_id = r.id LEFT JOIN people p ON ap.person_id = p.id WHERE {where_sql}"
+    c.execute(sql, params)
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else 0
+
+
+def get_albums():
+    # backward-compatible wrapper that returns all albums (no paging)
+    return load_albums_page(limit=1000, offset=0)
 
 
 def get_album_artist_names(album_id):
@@ -568,6 +667,27 @@ def get_role_by_name(role_name):
     result = c.fetchone()
     conn.close()
     return result
+
+
+# Helper: return list of person ids matching a name pattern (uses trigram index on Postgres)
+def get_person_ids_by_name(name):
+    conn = connect_db()
+    c = conn.cursor()
+    if USE_POSTGRES:
+        # ILIKE uses trigram index when pg_trgm is available
+        c.execute("SELECT id FROM people WHERE name ILIKE ?", (f"%{name}%",))
+    else:
+        c.execute("SELECT id FROM people WHERE lower(name) LIKE ?", (f"%{name.lower()}%",))
+    rows = c.fetchall()
+    conn.close()
+    return [r[0] for r in rows]
+
+
+# Helper: cached artist role id
+@st.cache_data(ttl=3600)
+def get_artist_role_id():
+    row = get_role_by_name('Artist')
+    return row[0] if row else None
 
 def add_role(role_name):
     conn = connect_db()
@@ -952,32 +1072,24 @@ elif st.session_state.view == "person_edit":
 elif st.session_state.view == "album_list":
     st.header("📚 アルバム一覧")
 
-    albums = get_albums()
-    rows = []
-    for album in albums:
-        album_id = album[0]
-        title = album[2] or ""
-        release_date = album[4] or album[3] or ""
-        artists = get_album_artist_names(album_id)
-        artist_text = ", ".join(artists) if artists else "（アーティスト未登録）"
-        rows.append({
-            "album_id": album_id,
-            "artist": artist_text,
-            "title": title,
-            "release_date": release_date,
-        })
+    # paging
+    page_size = 50
+    page = st.session_state.get("album_list_page", 0)
+    total = count_albums()
+    max_page = max(0, (total - 1) // page_size) if total else 0
 
-    def album_sort_key(row):
-        release_text = str(row["release_date"] or "")
-        if release_text:
-            release_key = release_text
-        else:
-            release_key = "9999-12-31"
-        return (row["artist"].lower(), release_key, row["title"].lower())
+    cols_nav = st.columns([1, 1, 6])
+    if cols_nav[0].button("前のページ") and page > 0:
+        st.session_state.album_list_page = page - 1
+        st.experimental_rerun()
+    cols_nav[1].button("次のページ") and (page < max_page) and st.session_state.update({"album_list_page": page + 1})
 
-    rows.sort(key=album_sort_key)
+    st.write(f"ページ {page + 1} / {max_page + 1} （合計 {total} 件）")
 
-    if not rows:
+    offset = page * page_size
+    albums = load_albums_page(limit=page_size, offset=offset)
+
+    if not albums:
         st.info("登録されているアルバムはありません。")
     else:
         cols = st.columns([3, 4, 2])
@@ -985,15 +1097,17 @@ elif st.session_state.view == "album_list":
         cols[1].write("**アルバム名**")
         cols[2].write("**発売日**")
 
-        for row in rows:
+        for album in albums:
+            album_id, catalog_no, title, year, release_date, artists = album
+            artist_text = artists or "（アーティスト未登録）"
             cols = st.columns([3, 4, 2])
-            cols[0].write(row["artist"])
-            if cols[1].button(row["title"], key=f"album_{row['album_id']}"):
-                st.session_state.current_album_id = row["album_id"]
+            cols[0].write(artist_text)
+            if cols[1].button(title or "(無題)", key=f"album_{album_id}"):
+                st.session_state.current_album_id = album_id
                 st.session_state.return_view = "album_list"
                 st.session_state.view = "album_view"
                 st.rerun()
-            cols[2].write(row["release_date"])
+            cols[2].write(release_date or (year or ""))
 
     st.markdown("---")
 
