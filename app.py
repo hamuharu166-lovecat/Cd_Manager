@@ -521,11 +521,28 @@ def add_track_people(track_id, person_id, role_id, instrument, note):
         conn.close()
         return None
 
-    c.execute("""
-        INSERT INTO track_people (track_id, person_id, role_id, instrument, note)
-        VALUES (?, ?, ?, ?, ?)
-    """, (track_id, person_id, role_id, instrument, note))
-    conn.commit()
+    try:
+        c.execute("""
+            INSERT INTO track_people (track_id, person_id, role_id, instrument, note)
+            VALUES (?, ?, ?, ?, ?)
+        """, (track_id, person_id, role_id, instrument, note))
+        conn.commit()
+    except Exception as exc:
+        try:
+            import psycopg
+            from psycopg.errors import UniqueViolation
+        except Exception:
+            psycopg = None
+            UniqueViolation = None
+        if UniqueViolation is not None and isinstance(exc, UniqueViolation):
+            conn.close()
+            return None
+        import sqlite3 as _sqlite
+        if isinstance(exc, _sqlite.IntegrityError):
+            conn.close()
+            return None
+        conn.close()
+        raise
     conn.close()
     return True
 
@@ -581,11 +598,31 @@ def add_album_people(album_id, person_id, role_id, instrument, note):
         conn.close()
         return None
 
-    c.execute("""
-        INSERT INTO album_people (album_id, person_id, role_id, instrument, note)
-        VALUES (?, ?, ?, ?, ?)
-    """, (album_id, person_id, role_id, instrument, note))
-    conn.commit()
+    try:
+        c.execute("""
+            INSERT INTO album_people (album_id, person_id, role_id, instrument, note)
+            VALUES (?, ?, ?, ?, ?)
+        """, (album_id, person_id, role_id, instrument, note))
+        conn.commit()
+    except Exception as exc:
+        # Suppress unique-violation race conditions on Postgres, and integrity errors on SQLite
+        try:
+            import psycopg
+            from psycopg.errors import UniqueViolation
+        except Exception:
+            psycopg = None
+            UniqueViolation = None
+        if UniqueViolation is not None and isinstance(exc, UniqueViolation):
+            # duplicate inserted concurrently by another request — ignore
+            conn.close()
+            return None
+        import sqlite3 as _sqlite
+        if isinstance(exc, _sqlite.IntegrityError):
+            conn.close()
+            return None
+        # re-raise unexpected exceptions
+        conn.close()
+        raise
     conn.close()
     return True
 
