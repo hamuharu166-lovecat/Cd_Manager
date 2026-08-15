@@ -592,35 +592,33 @@ def update_track_people(tp_id, person_id, role_id, instrument, note):
 def add_album_people(album_id, person_id, role_id, instrument, note):
     conn = connect_db()
     c = conn.cursor()
-    # avoid duplicate album_people entries: check existence first
-    c.execute("SELECT 1 FROM album_people WHERE album_id = ? AND person_id = ? AND role_id = ?", (album_id, person_id, role_id))
-    if c.fetchone():
-        conn.close()
-        return None
+    # avoid duplicate album_people entries: check existence first (best-effort)
+    try:
+        c.execute("SELECT 1 FROM album_people WHERE album_id = ? AND person_id = ? AND role_id = ?", (album_id, person_id, role_id))
+        if c.fetchone():
+            conn.close()
+            return None
+    except Exception:
+        # if this select fails for any reason, continue to attempt insert and let DB handle uniqueness
+        pass
 
     try:
-        c.execute("""
-            INSERT INTO album_people (album_id, person_id, role_id, instrument, note)
-            VALUES (?, ?, ?, ?, ?)
-        """, (album_id, person_id, role_id, instrument, note))
+        if USE_POSTGRES:
+            # use Postgres upsert-free pattern to avoid race conditions
+            c.execute(
+                "INSERT INTO album_people (album_id, person_id, role_id, instrument, note) VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                (album_id, person_id, role_id, instrument, note)
+            )
+        else:
+            # SQLite: use INSERT OR IGNORE to avoid unique constraint errors
+            c.execute(
+                "INSERT OR IGNORE INTO album_people (album_id, person_id, role_id, instrument, note) VALUES (?, ?, ?, ?, ?)",
+                (album_id, person_id, role_id, instrument, note)
+            )
         conn.commit()
     except Exception as exc:
-        # Suppress unique-violation race conditions on Postgres, and integrity errors on SQLite
-        try:
-            import psycopg
-            from psycopg.errors import UniqueViolation
-        except Exception:
-            psycopg = None
-            UniqueViolation = None
-        if UniqueViolation is not None and isinstance(exc, UniqueViolation):
-            # duplicate inserted concurrently by another request — ignore
-            conn.close()
-            return None
-        import sqlite3 as _sqlite
-        if isinstance(exc, _sqlite.IntegrityError):
-            conn.close()
-            return None
-        # re-raise unexpected exceptions
+        # If unexpected error, log and re-raise
+        print(f"add_album_people: unexpected error inserting album_id={album_id}, person_id={person_id}, role_id={role_id}: {exc}")
         conn.close()
         raise
     conn.close()
@@ -1632,9 +1630,11 @@ elif st.session_state.view == "album_edit":
         # 2. 新しい Artist を追加
         role_row = get_role_by_name("Artist")
         role_id = role_row[0]
-        add_album_people(album[0], selected_artist_id, role_id, "", "")
-
-        st.success("アルバム情報を更新しました")
+        added = add_album_people(album[0], selected_artist_id, role_id, "", "")
+        if added:
+            st.success("アルバム情報を更新しました（アーティストを更新しました）")
+        else:
+            st.warning("アーティストの更新が適用されませんでした（既に同じ情報があるか、DB 側で挿入が抑制されました）。ログを確認してください。")
         #st.rerun()
 
     st.markdown("---")
