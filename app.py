@@ -1433,7 +1433,7 @@ elif st.session_state.view == "album_register":
         min_value=min_date,
         max_value=max_date
     )
-    release_date_str = release_date.strftime("%Y-%m-%d") if release_date else ""
+    release_date_str = release_date.strftime("%Y/%m/%d") if release_date else ""
 
     # 発売年
     if release_date:
