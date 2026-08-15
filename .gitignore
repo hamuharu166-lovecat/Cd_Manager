@@ -1,0 +1,26 @@
+# バイトコード
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 仮想環境
+venv/
+.venv/
+env/
+
+# 配布物
+dist/
+build/
+*.egg-info/
+
+# 環境変数
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# バックアップ
+app_20260808
+app_20260812
