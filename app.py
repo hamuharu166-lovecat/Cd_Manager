@@ -515,12 +515,19 @@ def get_tracks_by_person(person_id):
 def add_track_people(track_id, person_id, role_id, instrument, note):
     conn = connect_db()
     c = conn.cursor()
+    # avoid duplicate track_people entries
+    c.execute("SELECT 1 FROM track_people WHERE track_id = ? AND person_id = ? AND role_id = ?", (track_id, person_id, role_id))
+    if c.fetchone():
+        conn.close()
+        return None
+
     c.execute("""
         INSERT INTO track_people (track_id, person_id, role_id, instrument, note)
         VALUES (?, ?, ?, ?, ?)
     """, (track_id, person_id, role_id, instrument, note))
     conn.commit()
     conn.close()
+    return True
 
 def get_track_people(track_id):
     conn = connect_db()
@@ -568,12 +575,19 @@ def update_track_people(tp_id, person_id, role_id, instrument, note):
 def add_album_people(album_id, person_id, role_id, instrument, note):
     conn = connect_db()
     c = conn.cursor()
+    # avoid duplicate album_people entries: check existence first
+    c.execute("SELECT 1 FROM album_people WHERE album_id = ? AND person_id = ? AND role_id = ?", (album_id, person_id, role_id))
+    if c.fetchone():
+        conn.close()
+        return None
+
     c.execute("""
         INSERT INTO album_people (album_id, person_id, role_id, instrument, note)
         VALUES (?, ?, ?, ?, ?)
     """, (album_id, person_id, role_id, instrument, note))
     conn.commit()
     conn.close()
+    return True
 
 def get_album_people(album_id):
     conn = connect_db()
