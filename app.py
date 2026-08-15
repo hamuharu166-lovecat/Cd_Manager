@@ -1473,7 +1473,7 @@ elif st.session_state.view == "album_register":
         min_value=min_date,
         max_value=max_date
     )
-    original_release_date_str = original_release_date.strftime("%Y-%m-%d") if original_release_date else ""
+    original_release_date_str = original_release_date.strftime("%Y/%m/%d") if original_release_date else ""
 
     omnibus_flag = st.checkbox("オムニバスアルバム（複数人物）")
 
@@ -1610,7 +1610,7 @@ elif st.session_state.view == "album_edit":
         min_value=min_date,
         max_value=max_date
     )
-    release_date_str = release_date.strftime("%Y-%m-%d") if release_date else ""
+    release_date_str = release_date.strftime("%Y/%m/%d") if release_date else ""
     
     # 発売年
     if release_date:
@@ -1651,7 +1651,7 @@ elif st.session_state.view == "album_edit":
     original_release_date_value = None
     if album[9]:
         try:
-            original_release_date_value = dt.datetime.strptime(album[9], "%Y-%m-%d").date()
+            original_release_date_value = dt.datetime.strptime(album[9], "%Y/%m/%d").date()
         except ValueError:
             original_release_date_value = None
 
@@ -1661,7 +1661,7 @@ elif st.session_state.view == "album_edit":
         min_value=min_date,
         max_value=max_date
     )
-    original_release_date_str = original_release_date.strftime("%Y-%m-%d") if original_release_date else ""
+    original_release_date_str = original_release_date.strftime("%Y/%m/%d") if original_release_date else ""
     
     omnibus_flag = st.checkbox("オムニバスアルバム（複数人物）", value=bool(album[5]))
     
@@ -1906,7 +1906,7 @@ elif st.session_state.view == "track_register":
         default_original_release_date = None
         if tr[7]:
             try:
-                default_original_release_date = dt.datetime.strptime(tr[7], "%Y-%m-%d").date()
+                default_original_release_date = dt.datetime.strptime(tr[7], "%Y/%m/%d").date()
             except ValueError:
                 default_original_release_date = None
     else:
@@ -1963,7 +1963,7 @@ elif st.session_state.view == "track_register":
         min_value=dt.date(1960, 1, 1),
         max_value=dt.datetime.today().date()
     )
-    original_release_date_str = original_release_date.strftime("%Y-%m-%d") if original_release_date else ""
+    original_release_date_str = original_release_date.strftime("%Y/%m/%d") if original_release_date else ""
 
     col_save, col_add, col_back = st.columns([1,1,1])
     if col_save.button("更新"):
@@ -2324,7 +2324,7 @@ elif st.session_state.view == "track_edit":
         original_release_date_value = None
         if track[7]:
             try:
-                original_release_date_value = dt.datetime.strptime(track[7], "%Y-%m-%d").date()
+                original_release_date_value = dt.datetime.strptime(track[7], "%Y/%m/%d").date()
             except ValueError:
                 original_release_date_value = None
 
@@ -2334,7 +2334,7 @@ elif st.session_state.view == "track_edit":
             min_value=dt.date(1960, 1, 1),
             max_value=dt.datetime.today().date()
         )
-        original_release_date_str = original_release_date.strftime("%Y-%m-%d") if original_release_date else ""
+        original_release_date_str = original_release_date.strftime("%Y/%m/%d") if original_release_date else ""
     else:
         track_no = st.number_input("曲番号", min_value=1, value=1)
         title = st.text_input("曲名")
@@ -2350,7 +2350,7 @@ elif st.session_state.view == "track_edit":
             min_value=dt.date(1960, 1, 1),
             max_value=dt.datetime.today().date()
         )
-        original_release_date_str = original_release_date.strftime("%Y-%m-%d") if original_release_date else ""
+        original_release_date_str = original_release_date.strftime("%Y/%m/%d") if original_release_date else ""
 
     # -----------------------------
     # 曲情報の保存
