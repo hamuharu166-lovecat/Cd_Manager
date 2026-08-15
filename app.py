@@ -3,6 +3,7 @@ import re
 import streamlit as st
 import sqlite3
 import datetime as dt
+import time
 
 try:
     import psycopg
@@ -633,14 +634,25 @@ def set_album_artist(album_id, person_id, role_id, instrument, note):
     conn = connect_db()
     c = conn.cursor()
     try:
-        # Begin transaction is implicit; ensure operations use same connection
-        # Delete existing rows for this album & role
+        # Delete existing rows for this album & role using DB-specific placeholder handling
         c.execute("DELETE FROM album_people WHERE album_id = ? AND role_id = ?", (album_id, role_id))
-        # Insert new artist
-        c.execute("INSERT INTO album_people (album_id, person_id, role_id, instrument, note) VALUES (?, ?, ?, ?, ?)",
-                  (album_id, person_id, role_id, instrument, note))
+
+        # Insert new artist with conflict-safe pattern
+        if USE_POSTGRES:
+            # Use ON CONFLICT DO NOTHING to avoid race-condition unique violations
+            c.execute(
+                "INSERT INTO album_people (album_id, person_id, role_id, instrument, note) VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                (album_id, person_id, role_id, instrument, note)
+            )
+            inserted = c.rowcount
+        else:
+            c.execute(
+                "INSERT OR IGNORE INTO album_people (album_id, person_id, role_id, instrument, note) VALUES (?, ?, ?, ?, ?)",
+                (album_id, person_id, role_id, instrument, note)
+            )
+            inserted = c.rowcount
+
         conn.commit()
-        inserted = c.rowcount
     except Exception as exc:
         # Log and re-raise unexpected errors
         print(f"set_album_artist: unexpected error for album_id={album_id}, person_id={person_id}, role_id={role_id}: {exc}")
@@ -878,25 +890,36 @@ if st.session_state.view == "album_search":
 
 elif st.session_state.view == "album_search_results":
     st.header("🔎 アルバム検索結果")
-    artist_keyword = (st.session_state.get("album_search_artist") or "").strip().lower()
-    album_keyword = (st.session_state.get("album_search_album") or "").strip().lower()
+    # Keep original input values (don't force lowercasing here; load_albums_page handles searches)
+    artist_keyword = (st.session_state.get("album_search_artist") or "").strip()
+    album_keyword = (st.session_state.get("album_search_album") or "").strip()
+
+    # Use the aggregated, cached load_albums_page which avoids N+1 queries.
+    start = time.perf_counter()
+    albums = load_albums_page(limit=1000, offset=0,
+                              search_artist=artist_keyword if artist_keyword else None,
+                              search_title=album_keyword if album_keyword else None)
+    duration_ms = (time.perf_counter() - start) * 1000.0
+    st.info(f"Albums loaded in {duration_ms:.1f} ms — {len(albums)} rows returned")
 
     rows = []
-    for album in get_albums():
+    # albums rows: (id, catalog_no, title, year, release_date, artists)
+    for album in albums:
         album_id = album[0]
         title = album[2] or ""
         release_date = album[4] or album[3] or ""
-        artists = get_album_artist_names(album_id)
-        artist_text = ", ".join(artists) if artists else "（未登録）"
+        artist_text = album[5] if len(album) > 5 else ""
+        artist_display = artist_text if artist_text else "（未登録）"
 
-        if artist_keyword and artist_keyword not in artist_text.lower():
+        # Apply any additional filtering defensively (should already be handled by load_albums_page)
+        if artist_keyword and artist_keyword.lower() not in artist_display.lower():
             continue
-        if album_keyword and album_keyword not in title.lower():
+        if album_keyword and album_keyword.lower() not in title.lower():
             continue
 
         rows.append({
             "album_id": album_id,
-            "artist": artist_text,
+            "artist": artist_display,
             "title": title,
             "release_date": release_date,
         })
