@@ -902,7 +902,7 @@ elif st.session_state.view == "album_search_results":
                               search_artist=artist_keyword if artist_keyword else None,
                               search_title=album_keyword if album_keyword else None)
     duration_ms = (time.perf_counter() - start) * 1000.0
-    st.info(f"Albums loaded in {duration_ms:.1f} ms — {len(albums)} rows returned")
+    #st.info(f"Albums loaded in {duration_ms:.1f} ms — {len(albums)} rows returned")
 
     rows = []
     # albums rows: (id, catalog_no, title, year, release_date, artists)
@@ -1263,8 +1263,8 @@ elif st.session_state.view == "album_view":
         if is_omnibus:
             cols = st.columns([1, 3, 5, 3, 3, 3])
             cols[0].write("#")
-            cols[1].write("アーティスト")
-            cols[2].write("曲名")
+            cols[1].write("曲名")
+            cols[2].write("アーティスト")
             cols[3].write("作詞")
             cols[4].write("作曲")
             cols[5].write("編曲")
@@ -1289,13 +1289,13 @@ elif st.session_state.view == "album_view":
             if is_omnibus:
                 row_cols = st.columns([1, 3, 5, 3, 3, 3])
                 row_cols[0].write(str(track_no))
-                row_cols[1].write(artist or "（未登録）")
-                if row_cols[2].button(track_title, key=f"view_track_{track_id}"):
+                if row_cols[1].button(track_title, key=f"view_track_{track_id}"):
                     st.session_state.current_track_id = track_id
                     st.session_state.current_album_id = album_id
                     st.session_state.return_view = "album_view"
                     st.session_state.view = "track_view"
                     st.rerun()
+                row_cols[2].write(artist or "（未登録）")
                 row_cols[3].write(lyricist)
                 row_cols[4].write(composer)
                 row_cols[5].write(arranger)
@@ -1683,7 +1683,7 @@ elif st.session_state.view == "album_edit":
         role_id = role_row[0]
         updated = set_album_artist(album[0], selected_artist_id, role_id, "", "")
         if updated:
-            st.success("アルバム情報を更新しました（アーティストを更新しました）")
+            st.success("アルバム情報を更新しました")
         else:
             st.warning("アーティストの更新が適用されませんでした（挿入が抑制されました）。ログを確認してください。")
         #st.rerun()
