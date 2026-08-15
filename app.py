@@ -256,18 +256,19 @@ def load_albums_page(limit=50, offset=0, search_artist=None, search_title=None):
             conn.close()
             return []
         artist_role_id = get_artist_role_id()
-        sql = """
+        person_placeholders = ", ".join(["?"] * len(person_ids))
+        sql = f"""
             SELECT a.id, a.catalog_no, a.title, a.year, a.release_date,
                 COALESCE(string_agg(p.name, ', ' ORDER BY p.name) FILTER (WHERE r.role_name = 'Artist'), '') AS artists
             FROM albums a
-            JOIN album_people ap ON ap.album_id = a.id AND ap.role_id = ? AND ap.person_id = ANY(?)
+            JOIN album_people ap ON ap.album_id = a.id AND ap.role_id = ? AND ap.person_id IN ({person_placeholders})
             LEFT JOIN roles r ON ap.role_id = r.id
             LEFT JOIN people p ON ap.person_id = p.id
             GROUP BY a.id
             ORDER BY artists, COALESCE(a.release_date, a.year::text), a.title
             LIMIT ? OFFSET ?
         """
-        params = [artist_role_id, tuple(person_ids), limit, offset]
+        params = [artist_role_id, *person_ids, limit, offset]
         c.execute(sql, params)
         rows = c.fetchall()
         conn.close()
@@ -327,8 +328,9 @@ def count_albums(search_artist=None, search_title=None):
             conn.close()
             return 0
         artist_role_id = get_artist_role_id()
-        sql = "SELECT COUNT(DISTINCT a.id) FROM albums a JOIN album_people ap ON ap.album_id = a.id AND ap.role_id = ? AND ap.person_id = ANY(?)"
-        params = [artist_role_id, tuple(person_ids)]
+        person_placeholders = ", ".join(["?"] * len(person_ids))
+        sql = f"SELECT COUNT(DISTINCT a.id) FROM albums a JOIN album_people ap ON ap.album_id = a.id AND ap.role_id = ? AND ap.person_id IN ({person_placeholders})"
+        params = [artist_role_id, *person_ids]
         c.execute(sql, params)
         row = c.fetchone()
         conn.close()
