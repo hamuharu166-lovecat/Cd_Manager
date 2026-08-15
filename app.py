@@ -1182,7 +1182,9 @@ elif st.session_state.view == "album_list":
     if cols_nav[0].button("前のページ") and page > 0:
         st.session_state.album_list_page = page - 1
         st.experimental_rerun()
-    cols_nav[1].button("次のページ") and (page < max_page) and st.session_state.update({"album_list_page": page + 1})
+    if cols_nav[1].button("次のページ") and page < max_page:
+        st.session_state.album_list_page = page + 1
+        st.experimental_rerun()
 
     st.write(f"ページ {page + 1} / {max_page + 1} （合計 {total} 件）")
 
