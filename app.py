@@ -4,6 +4,7 @@ import streamlit as st
 import sqlite3
 import datetime as dt
 import time
+import pandas as pd
 
 try:
     import psycopg
@@ -939,20 +940,37 @@ elif st.session_state.view == "album_search_results":
     if not rows:
         st.info("条件に一致するアルバムはありません。")
     else:
-        cols = st.columns([3, 4, 2])
-        cols[0].write("**アーティスト名**")
-        cols[1].write("**アルバム名**")
-        cols[2].write("**発売日**")
+        # 1. 取得データを pandas DataFrame に変換
+        df = pd.DataFrame(rows)
 
-        for row in rows:
-            cols = st.columns([3, 4, 2])
-            cols[0].write(row["artist"])
-            if cols[1].button(row["title"], key=f"album_search_result_{row['album_id']}"):
-                st.session_state.current_album_id = row["album_id"]
-                st.session_state.return_view = "album_search_results"
-                st.session_state.view = "album_view"
-                st.rerun()
-            cols[2].write(row["release_date"])
+        # 2. 表示用に列名を日本語へ変更
+        df_display = df[["artist", "title", "release_date"]].rename(
+            columns={
+                "artist": "アーティスト名",
+                "title": "アルバム名",
+                "release_date": "発売日"
+            }
+        )
+
+        # 3. st.dataframe を使って一括描画（イベント検知で選択可能にする）
+        event = st.dataframe(
+            df_display,
+            use_container_width=True,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row"
+        )
+
+        # 4. 行が選択された場合に詳細画面へ遷移する処理
+        selected_rows = event.selection.get("rows", [])
+        if selected_rows:
+            selected_index = selected_rows[0]
+            selected_album_id = df.iloc[selected_index]["album_id"]
+            
+            st.session_state.current_album_id = selected_album_id
+            st.session_state.return_view = "album_search_results"
+            st.session_state.view = "album_view"
+            st.rerun()
 
     if st.button("条件を変更"):
         st.session_state.view = "album_search"
@@ -1181,10 +1199,10 @@ elif st.session_state.view == "album_list":
     cols_nav = st.columns([1, 1, 6])
     if cols_nav[0].button("前のページ") and page > 0:
         st.session_state.album_list_page = page - 1
-        st.experimental_rerun()
+        st.rerun()
     if cols_nav[1].button("次のページ") and page < max_page:
         st.session_state.album_list_page = page + 1
-        st.experimental_rerun()
+        st.rerun()
 
     st.write(f"ページ {page + 1} / {max_page + 1} （合計 {total} 件）")
 
@@ -1199,17 +1217,36 @@ elif st.session_state.view == "album_list":
         cols[1].write("**アルバム名**")
         cols[2].write("**発売日**")
 
-        for album in albums:
-            album_id, catalog_no, title, year, release_date, artists = album
-            artist_text = artists or "（アーティスト未登録）"
-            cols = st.columns([3, 4, 2])
-            cols[0].write(artist_text)
-            if cols[1].button(title or "(無題)", key=f"album_{album_id}"):
-                st.session_state.current_album_id = album_id
-                st.session_state.return_view = "album_list"
-                st.session_state.view = "album_view"
-                st.rerun()
-            cols[2].write(release_date or (year or ""))
+        # 1. 取得したアルバム一覧を DataFrame 化
+        df_albums = pd.DataFrame(albums_data) # リスト形式のデータを DataFrame へ投入
+
+        df_display = df_albums[["artist", "title", "release_date"]].rename(
+            columns={
+                "artist": "アーティスト名",
+                "title": "アルバム名",
+                "release_date": "発売日"
+            }
+        )
+
+        # 2. DataFrame の一括描画と選択検知
+        event = st.dataframe(
+            df_display,
+            use_container_width=True,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row"
+        )
+
+        # 3. 選択時の遷移処理
+        selected_rows = event.selection.get("rows", [])
+        if selected_rows:
+            selected_index = selected_rows[0]
+            selected_album_id = df_albums.iloc[selected_index]["album_id"]
+            
+            st.session_state.current_album_id = selected_album_id
+            st.session_state.return_view = "album_list"
+            st.session_state.view = "album_view"
+            st.rerun()
 
     st.markdown("---")
 
@@ -2265,7 +2302,7 @@ elif st.session_state.view == "track_register":
         col_yes, col_no = st.columns([1,1])
         if col_no.button("キャンセル"):
             del st.session_state.pending_person_adds
-            st.experimental_rerun()
+            st.rerun()
         if col_yes.button("新規登録して追加（確認）"):
             # perform additions
             items = st.session_state.pending_person_adds["items"]
