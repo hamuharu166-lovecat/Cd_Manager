@@ -963,11 +963,15 @@ elif st.session_state.view == "album_search_results":
 
         # 4. 行が選択された場合に詳細画面へ遷移する処理
         selected_rows = event.selection.get("rows", [])
+
+        print(f"Selected rows: {selected_rows}")
+        print(df.iloc[selected_rows[0]]["album_id"] if selected_rows else "No selection")
+
         if selected_rows:
             selected_index = selected_rows[0]
             selected_album_id = df.iloc[selected_index]["album_id"]
             
-            st.session_state.current_album_id = selected_album_id
+            st.session_state.current_album_id = int(selected_album_id)
             st.session_state.return_view = "album_search_results"
             st.session_state.view = "album_view"
             st.rerun()
@@ -1072,27 +1076,47 @@ elif st.session_state.view == "track_search_results":
     if not rows:
         st.info("条件に一致する曲はありません。")
     else:
-        cols = st.columns([4, 4, 4, 2, 2, 2])
-        cols[0].write("**アーティスト名**")
-        cols[1].write("**アルバム名**")
-        cols[2].write("**曲名**")
-        cols[3].write("**作詞者**")
-        cols[4].write("**作曲者**")
-        cols[5].write("**編曲者**")
+        # 1. DataFrame 作成時に columns を直接指定する
+        df_albums = pd.DataFrame(
+            rows, 
+            columns=["track_id", "album_id", "artist", "album_title", "title", "lyricist", "composer", "arranger"]
+        )
+        # 2. 表示に必要な列を抽出して日本語化
+        df_display = df_albums[["title", "artist", "album_title"]].rename(
+            columns={
+                "title": "曲名",
+                "artist": "アーティスト名",
+                "album_title": "アルバム名"
+            }
+        )
 
-        for row in rows:
-            cols = st.columns([4, 4, 4, 2, 2, 2])
-            cols[0].write(row["artist"])
-            cols[1].write(row["album_title"])
-            if cols[2].button(row["title"], key=f"track_search_result_{row['track_id']}"):
-                st.session_state.current_track_id = row["track_id"]
-                st.session_state.current_album_id = row["album_id"]
-                st.session_state.return_view = "track_search_results"
-                st.session_state.view = "track_view"
-                st.rerun()
-            cols[3].write(row["lyricist"] or "-")
-            cols[4].write(row["composer"] or "-")
-            cols[5].write(row["arranger"] or "-")
+        # 3. st.dataframe による描画と選択処理
+        event = st.dataframe(
+            df_display,
+            use_container_width=True,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            height=400,
+            column_config={
+                "曲名": st.column_config.Column("曲名", width="medium"),
+                "アーティスト名": st.column_config.Column("アーティスト名", width="large"),
+                "アルバム名": st.column_config.Column("アルバム名", width="large"),
+            }
+        )
+
+        selected_rows = event.selection.get("rows", [])
+        if selected_rows:
+            selected_index = selected_rows[0]
+            selected_track_id = df_albums.iloc[selected_index]["track_id"]
+            selected_album_id = df_albums.iloc[selected_index]["album_id"]
+
+            st.session_state.current_track_id = int(selected_track_id)
+            st.session_state.current_album_id = int(selected_album_id)
+            st.session_state.return_view = "track_search_results"
+            st.session_state.view = "track_view"
+            st.rerun()
+
 
     if st.button("条件を変更"):
         st.session_state.view = "track_search"
@@ -1235,7 +1259,7 @@ elif st.session_state.view == "album_list":
             hide_index=True,
             on_select="rerun",
             selection_mode="single-row",
-            height=400,
+            height=500,
             column_config={
                 "アーティスト名": st.column_config.Column("アーティスト名", width="medium"),
                 "アルバム名": st.column_config.Column("アルバム名", width="large"),
@@ -1355,7 +1379,7 @@ elif st.session_state.view == "album_view":
                 hide_index=True,
                 on_select="rerun",
                 selection_mode="single-row",
-                height=400,
+                height=500,
                 column_config={
                     "曲順": st.column_config.Column("曲順", width="small"),
                     "曲名": st.column_config.Column("曲名", width="large"),
@@ -1385,7 +1409,7 @@ elif st.session_state.view == "album_view":
                 hide_index=True,
                 on_select="rerun",
                 selection_mode="single-row",
-                height=400,
+                height=500,
                 column_config={
                     "曲順": st.column_config.Column("曲順", width="small"),
                     "曲名": st.column_config.Column("曲名", width="large"),
