@@ -1072,7 +1072,7 @@ elif st.session_state.view == "track_search_results":
     if not rows:
         st.info("条件に一致する曲はありません。")
     else:
-        cols = st.columns([3, 4, 4, 2, 2, 2])
+        cols = st.columns([4, 4, 4, 2, 2, 2])
         cols[0].write("**アーティスト名**")
         cols[1].write("**アルバム名**")
         cols[2].write("**曲名**")
@@ -1081,7 +1081,7 @@ elif st.session_state.view == "track_search_results":
         cols[5].write("**編曲者**")
 
         for row in rows:
-            cols = st.columns([3, 4, 4, 2, 2, 2])
+            cols = st.columns([4, 4, 4, 2, 2, 2])
             cols[0].write(row["artist"])
             cols[1].write(row["album_title"])
             if cols[2].button(row["title"], key=f"track_search_result_{row['track_id']}"):
@@ -1212,11 +1212,6 @@ elif st.session_state.view == "album_list":
     if not albums:
         st.info("登録されているアルバムはありません。")
     else:
-        cols = st.columns([3, 4, 2])
-        cols[0].write("**アーティスト名**")
-        cols[1].write("**アルバム名**")
-        cols[2].write("**発売日**")
-
         # 1. DataFrame 作成時に columns を直接指定する
         # SQLのSELECT結果（id, catalog_no, title, year, release_date, artists）に対応する列名を指定
         df_albums = pd.DataFrame(
@@ -1239,7 +1234,13 @@ elif st.session_state.view == "album_list":
             use_container_width=True,
             hide_index=True,
             on_select="rerun",
-            selection_mode="single-row"
+            selection_mode="single-row",
+            height=400,
+            column_config={
+                "アーティスト名": st.column_config.Column("アーティスト名", width="medium"),
+                "アルバム名": st.column_config.Column("アルバム名", width="large"),
+                "発売日": st.column_config.Column("発売日", width="small"),
+            }
         )
 
         selected_rows = event.selection.get("rows", [])
@@ -1302,58 +1303,110 @@ elif st.session_state.view == "album_view":
     tracks = get_tracks_by_album(album_id)
     is_omnibus = bool(album[5])
     if tracks:
-        # header
-        if is_omnibus:
-            cols = st.columns([1, 6, 3, 3, 3, 3])
-            cols[0].write("#")
-            cols[1].write("曲名")
-            cols[2].write("アーティスト")
-            cols[3].write("作詞")
-            cols[4].write("作曲")
-            cols[5].write("編曲")
-        else:
-            cols = st.columns([1, 6, 3, 3, 3])
-            cols[0].write("#")
-            cols[1].write("曲名")
-            cols[2].write("作詞")
-            cols[3].write("作曲")
-            cols[4].write("編曲")
-
-        for t in tracks:
-            track_id = t[0]
-            track_no = t[2]
-            track_title = t[3] or "(無題)"
+        # 1. 各曲の人物情報を取得し、dataframe用のリストに整形
+        tracks_data = []
+        for track in tracks:
+            track_id = track[0]
             tp = get_track_people(track_id)
-            lyricist = ", ".join([r[2] for r in tp if r[4] == "Lyricist"]) or ""
-            composer = ", ".join([r[2] for r in tp if r[4] == "Composer"]) or ""
-            arranger = ", ".join([r[2] for r in tp if r[4] == "Arranger"]) or ""
-            artist = ", ".join([r[2] for r in tp if r[4] == "Artist"]) or ""
+            lyricists = ", ".join([r[2] for r in tp if r[4] == "Lyricist"]) or ""
+            composers = ", ".join([r[2] for r in tp if r[4] == "Composer"]) or ""
+            arrangers = ", ".join([r[2] for r in tp if r[4] == "Arranger"]) or ""
+            artists = ", ".join([r[2] for r in tp if r[4] == "Artist"]) or ""
 
-            if is_omnibus:
-                row_cols = st.columns([1, 6, 3, 3, 3, 3])
-                row_cols[0].write(str(track_no))
-                if row_cols[1].button(track_title, key=f"view_track_{track_id}"):
-                    st.session_state.current_track_id = track_id
-                    st.session_state.current_album_id = album_id
-                    st.session_state.return_view = "album_view"
-                    st.session_state.view = "track_view"
-                    st.rerun()
-                row_cols[2].write(artist or "（未登録）")
-                row_cols[3].write(lyricist)
-                row_cols[4].write(composer)
-                row_cols[5].write(arranger)
-            else:
-                row_cols = st.columns([1, 6, 3, 3, 3])
-                row_cols[0].write(str(track_no))
-                if row_cols[1].button(track_title, key=f"view_track_{track_id}"):
-                    st.session_state.current_track_id = track_id
-                    st.session_state.current_album_id = album_id
-                    st.session_state.return_view = "album_view"
-                    st.session_state.view = "track_view"
-                    st.rerun()
-                row_cols[2].write(lyricist)
-                row_cols[3].write(composer)
-                row_cols[4].write(arranger)
+            tracks_data.append({
+                "track_id": track_id,
+                "album_id": track[1],
+                "track_no": track[2],
+                "title": track[3],
+                "duration": track[4],
+                "note": track[5],
+                "track_kana": track[6],
+                "original_release_date": track[7],
+                "artist": artists,
+                "lyricist": lyricists,
+                "composer": composers,
+                "arranger": arrangers
+            })
+        # DBの取得結果（tracks）または整形済みリストから DataFrame を作成
+        # ※ DBの取得列（例: 0:id, 1:album_id, 2:track_no, 3:title, 4:duration, 5:note, 6:track_kana, 7:original_release_date 等）に合わせて columns を指定
+        df_tracks = pd.DataFrame(
+            tracks_data,
+            columns=["track_id", "album_id", "track_no", "title", "duration", "note", "track_kana", "original_release_date", "artist", "lyricist", "composer", "arranger"]
+        )
+
+        # 表示に必要な列を選択して日本語ヘッダーに変更
+        if is_omnibus:
+            df_display = df_tracks[["track_no", "title", "artist", "lyricist", "composer", "arranger", "duration"]].rename(
+                columns={
+                    "track_no": "曲順",
+                    "title": "曲名",
+                    "artist": "アーティスト名",
+                    "lyricist": "作詞者",
+                    "composer": "作曲者",
+                    "arranger": "編曲者",
+                    "duration": "演奏時間"
+                }
+            )
+
+            # st.dataframe で一括表示
+            event = st.dataframe(
+                df_display,
+                use_container_width=True,
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                height=400,
+                column_config={
+                    "曲順": st.column_config.Column("曲順", width="small"),
+                    "曲名": st.column_config.Column("曲名", width="large"),
+                    "アーティスト名": st.column_config.Column("アーティスト名", width="medium") if is_omnibus else None,
+                    "作詞者": st.column_config.Column("作詞者", width="medium"),
+                    "作曲者": st.column_config.Column("作曲者", width="medium"),
+                    "編曲者": st.column_config.Column("編曲者", width="medium"),
+                    "演奏時間": st.column_config.Column("演奏時間", width="small"),
+                }
+        )
+        else:
+            df_display = df_tracks[["track_no", "title", "lyricist", "composer", "arranger", "duration"]].rename(
+                columns={
+                    "track_no": "曲順",
+                    "title": "曲名",
+                    "lyricist": "作詞者",
+                    "composer": "作曲者",
+                    "arranger": "編曲者",
+                    "duration": "演奏時間"
+                }
+            )
+
+            # st.dataframe で一括表示
+            event = st.dataframe(
+                df_display,
+                use_container_width=True,
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                height=400,
+                column_config={
+                    "曲順": st.column_config.Column("曲順", width="small"),
+                    "曲名": st.column_config.Column("曲名", width="large"),
+                    "作詞者": st.column_config.Column("作詞者", width="medium"),
+                    "作曲者": st.column_config.Column("作曲者", width="medium"),
+                    "編曲者": st.column_config.Column("編曲者", width="medium"),
+                    "演奏時間": st.column_config.Column("演奏時間", width="small"),
+                }
+        )
+
+        # クリックされた行を検知して詳細画面へ遷移
+        selected_rows = event.selection.get("rows", [])
+        if selected_rows:
+            selected_index = selected_rows[0]
+            selected_track_id = df_tracks.iloc[selected_index]["track_id"]
+            
+            st.session_state.current_track_id = int(selected_track_id)
+            st.session_state.return_view = st.session_state.view
+            st.session_state.view = "track_view"
+            st.rerun()
+
     else:
         st.write("曲が登録されていません")
 
