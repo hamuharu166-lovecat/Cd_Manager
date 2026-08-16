@@ -1217,9 +1217,14 @@ elif st.session_state.view == "album_list":
         cols[1].write("**アルバム名**")
         cols[2].write("**発売日**")
 
-        # 1. 取得したアルバム一覧を DataFrame 化
-        df_albums = pd.DataFrame(albums_data) # リスト形式のデータを DataFrame へ投入
+        # 1. DataFrame 作成時に columns を直接指定する
+        # SQLのSELECT結果（id, catalog_no, title, year, release_date, artists）に対応する列名を指定
+        df_albums = pd.DataFrame(
+            albums, 
+            columns=["album_id", "catalog_no", "title", "year", "release_date", "artist"]
+        )
 
+        # 2. 表示に必要な列を抽出して日本語化
         df_display = df_albums[["artist", "title", "release_date"]].rename(
             columns={
                 "artist": "アーティスト名",
@@ -1228,7 +1233,7 @@ elif st.session_state.view == "album_list":
             }
         )
 
-        # 2. DataFrame の一括描画と選択検知
+        # 3. st.dataframe による描画と選択処理
         event = st.dataframe(
             df_display,
             use_container_width=True,
@@ -1237,13 +1242,12 @@ elif st.session_state.view == "album_list":
             selection_mode="single-row"
         )
 
-        # 3. 選択時の遷移処理
         selected_rows = event.selection.get("rows", [])
         if selected_rows:
             selected_index = selected_rows[0]
             selected_album_id = df_albums.iloc[selected_index]["album_id"]
             
-            st.session_state.current_album_id = selected_album_id
+            st.session_state.current_album_id = int(selected_album_id)
             st.session_state.return_view = "album_list"
             st.session_state.view = "album_view"
             st.rerun()
@@ -1300,7 +1304,7 @@ elif st.session_state.view == "album_view":
     if tracks:
         # header
         if is_omnibus:
-            cols = st.columns([1, 3, 5, 3, 3, 3])
+            cols = st.columns([1, 6, 3, 3, 3, 3])
             cols[0].write("#")
             cols[1].write("曲名")
             cols[2].write("アーティスト")
@@ -1308,7 +1312,7 @@ elif st.session_state.view == "album_view":
             cols[4].write("作曲")
             cols[5].write("編曲")
         else:
-            cols = st.columns([1, 5, 3, 3, 3])
+            cols = st.columns([1, 6, 3, 3, 3])
             cols[0].write("#")
             cols[1].write("曲名")
             cols[2].write("作詞")
@@ -1326,7 +1330,7 @@ elif st.session_state.view == "album_view":
             artist = ", ".join([r[2] for r in tp if r[4] == "Artist"]) or ""
 
             if is_omnibus:
-                row_cols = st.columns([1, 3, 5, 3, 3, 3])
+                row_cols = st.columns([1, 6, 3, 3, 3, 3])
                 row_cols[0].write(str(track_no))
                 if row_cols[1].button(track_title, key=f"view_track_{track_id}"):
                     st.session_state.current_track_id = track_id
@@ -1339,7 +1343,7 @@ elif st.session_state.view == "album_view":
                 row_cols[4].write(composer)
                 row_cols[5].write(arranger)
             else:
-                row_cols = st.columns([1, 5, 3, 3, 3])
+                row_cols = st.columns([1, 6, 3, 3, 3])
                 row_cols[0].write(str(track_no))
                 if row_cols[1].button(track_title, key=f"view_track_{track_id}"):
                     st.session_state.current_track_id = track_id
